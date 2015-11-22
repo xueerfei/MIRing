@@ -1,0 +1,16 @@
+<resources>
+
+    <!-- for main text color theme -->
+    <color name="red">#D95238</color>
+    <color name="color_333333">#333333</color>
+    <color name="color_666666">#666666</color>
+    <color name="color_999999">#999999</color>
+    
+    <color name="heart_default">#E48674</color>
+    <color name="heart_select">#E48674</color>
+
+    <color name="translucent">#10000000</color>
+    
+     <color name="rippelColor">#FFFFFF</color>
+     <color name="heartbeat">#EAAD7E</color>
+</resources>
