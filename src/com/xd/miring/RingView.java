@@ -2,14 +2,14 @@ package com.xd.miring;
 
 import java.util.Arrays;
 
-import android.animation.Animator.AnimatorListener;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.DrawFilter;
 import android.graphics.Paint;
-import android.graphics.PaintFlagsDrawFilter;
 import android.graphics.Paint.Style;
+import android.graphics.PaintFlagsDrawFilter;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.util.AttributeSet;
 import android.util.Log;
@@ -96,7 +96,7 @@ public class RingView extends View {
 	/**
 	 * 正弦曲线偏移量
 	 * */
-	private int mOffset=0;
+	private volatile int mOffset=0;
 	
 	/**
 	 * 振幅
@@ -113,9 +113,20 @@ public class RingView extends View {
 	 * */
 	private int mOffsetSpeed;
 	
+	/**
+	 * 绘制心率线Paint
+	 * */
 	private Paint mHeartBeatPaint;
 	
+	/**
+	 * 绘制心率线path的Paint -- 优化
+	 * */
+	private Paint mHeartBeatPathPaint;
+	
+	Path path = new Path();
+	
 	private void init() {
+		setLayerType(View.LAYER_TYPE_SOFTWARE, null); 
 		mRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 		if (!isInEditMode()) {
 			// 造成错误的代码段
@@ -132,12 +143,14 @@ public class RingView extends View {
 		mOffsetSpeed = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, SPEED, mContext.getResources().getDisplayMetrics());
 		mHeartBeatPaint  =new Paint(Paint.ANTI_ALIAS_FLAG);
 		mHeartBeatPaint.setStrokeWidth(5);
+		//mHeartBeatPaint.setStyle(Style.STROKE);
 		if (!isInEditMode()) {
 			mHeartBeatPaint.setColor(mContext.getResources().getColor(R.color.heartbeat));
 		}
-		//startRingAnim();
-		//startHeartBeatAnmi();
-		//startSecondFrameAnmi();
+		
+		mHeartBeatPathPaint = new Paint(mHeartBeatPaint);
+		mHeartBeatPathPaint.setStrokeWidth(5);
+		mHeartBeatPathPaint.setStyle(Style.STROKE);
 	}
 
 
@@ -158,13 +171,70 @@ public class RingView extends View {
 		for (int i =  mHeartBeatWidth/3*2; i < mHeartBeatWidth; i++) {
 			mOriginalYPositon[i] = (float) (AmplitudeA * Math.sin(mPeriodFraction * i) + OFFSET_Y);
 		}
-		
 		x = w / 2;
 		y = h / 2;
 		mRadius = w / 2 - mHeartPaintWidth / 2; //因为制定了Paint的宽度，因此计算半径需要减去这个
 		mRectf = new RectF(x - mRadius, y - mRadius, x + mRadius, y + mRadius);
 	}
+	
+	private void resetPath(){
+		path.reset();
+		path.moveTo(mHeartPaintWidth+20, mTotalHeight/2-mOriginalYPositon[mOffset]);
+		int interval = mHeartBeatWidth - mOffset;
+		for(int i=mOffset+1,j=mHeartPaintWidth+20;i<mHeartBeatWidth;i++,j++){
+			path.lineTo(j, mTotalHeight/2-mOriginalYPositon[i]);
+		}
+		for(int i=0,j=interval+mHeartPaintWidth+20;i<mOffset;i++,j++){
+			path.lineTo(j, mTotalHeight/2-mOriginalYPositon[i]);
+		}
 
+	}
+	
+	private void resetPath1(){
+		path.reset();
+		path.moveTo(mHeartPaintWidth+20, mTotalHeight/2-mOriginalYPositon[mOffset]);
+		int interval = mHeartBeatWidth - mOffset;
+		//先找到全0的部分
+		int index = -1;
+		for(int i=mOffset+1;i<mHeartBeatWidth;i++){
+			if(mOriginalYPositon[i]==0){
+				index = i;
+			}else{
+				break;
+			}
+		}
+		if(index!=-1){
+			path.lineTo(mHeartPaintWidth+20+(index-mOffset+1), mTotalHeight/2);
+			for(int i=index+1,j=mHeartPaintWidth+20+(index-mOffset+2);i<mHeartBeatWidth;i++,j++){
+				path.lineTo(j, mTotalHeight/2-mOriginalYPositon[i]);
+			}
+		}else{
+			for(int i=mOffset+1,j=mHeartPaintWidth+20;i<mHeartBeatWidth;i++,j++)
+				path.lineTo(j, mTotalHeight/2-mOriginalYPositon[i]);
+		}
+		//查找最后全为0的index
+		index = -1;
+		for(int i =0;i<mOffset;i++){
+			if(mOriginalYPositon[i]==0)
+				index = i;
+			else
+				break;
+		}
+		if(index !=-1){
+			//修正视觉偏移量
+			path.lineTo(mHeartPaintWidth+20+(mHeartBeatWidth-mOffset), mTotalHeight/2);
+			path.lineTo(interval+mHeartPaintWidth+20+index, mTotalHeight/2);
+		for(int i=index+1,j=interval+mHeartPaintWidth+20+index+1;i<mOffset;i++,j++){
+			path.lineTo(j, mTotalHeight/2-mOriginalYPositon[i]);
+		}
+		}else{
+			for(int i=0,j=interval+mHeartPaintWidth+20;i<mOffset;i++,j++)
+				path.lineTo(j, mTotalHeight/2-mOriginalYPositon[i]);
+		}
+
+	}
+	
+	
 	@Override
 	protected void onDraw(Canvas canvas) {
 		super.onDraw(canvas);
@@ -182,6 +252,13 @@ public class RingView extends View {
 		}
 		//canvas.restoreToCount(level);
 		if(StartHeartBeatAnmiFlag){
+			resetPath1(); //或者resetPath ，这个优化效果一般
+			canvas.drawPath(path, mHeartBeatPathPaint);;
+			canvas.drawCircle(mHeartBeatWidth+20+mHeartPaintWidth, mTotalHeight/2-mOriginalYPositon[mOffset], 10, mHeartBeatPaint);
+		}
+		
+		/*-------------通过drawPoint方法绘制 会降低性能--------------------*/
+	/*	if(StartHeartBeatAnmiFlag){
 			//绘制心跳线
 			int interval = mHeartBeatWidth - mOffset;
 			for(int i=mOffset,j=mHeartPaintWidth+20;i<mHeartBeatWidth;i++,j++){
@@ -191,7 +268,8 @@ public class RingView extends View {
 				canvas.drawPoint(j, mTotalHeight/2-mOriginalYPositon[i], mHeartBeatPaint);
 			}
 			canvas.drawCircle(mHeartBeatWidth+20+mHeartPaintWidth, mTotalHeight/2-mOriginalYPositon[mOffset], 10, mHeartBeatPaint);
-		}
+		}*/
+	
 		if(StartFirstFrameFlag){
 			for(int i=0,j=mHeartPaintWidth+20;i<mHeartBeatWidth;i++,j++){
 				if(mDefaultYPostion[i]==-1)
@@ -200,6 +278,7 @@ public class RingView extends View {
 					canvas.drawPoint(j, mTotalHeight/2-mDefaultYPostion[i], mHeartBeatPaint);
 			}
 		}
+		
 	}
 
 
@@ -243,7 +322,7 @@ public class RingView extends View {
 				StartHeartBeatAnmiFlag = true;
 				startSecondFrameAnmi();
 			}
-		}).start();;
+		}).start();
 	}
 	/**
 	 * 循环心跳图
@@ -252,12 +331,12 @@ public class RingView extends View {
 		new Thread(new Runnable() {
 			@Override
 			public void run() {
-				 while (!StopHeartBeatAnmiFlag) {  
+				 while (!StopHeartBeatAnmiFlag) {
 	                	mOffset += mOffsetSpeed;
 	            		if(mOffset>=mHeartBeatWidth)
 	            			mOffset = 0;
 	                    try {  
-	                        Thread.sleep(80);  
+	                        Thread.sleep(50);  
 	                    } catch (InterruptedException e) {  
 	                    }  
 	                    postInvalidate();  
@@ -290,7 +369,6 @@ public class RingView extends View {
 		}).start();
 	}
 	
-	//public void startAnim
 
 	public void stopAnim(){
 		StopHeartBeatAnmiFlag = true;
